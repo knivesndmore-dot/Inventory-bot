@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import json, os
 
-TOKEN = os.getenv("8656525286")
+TOKEN = os.getenv("token")
 OWNER_ID = 7153152247   # your telegram numeric ID
 
 STOCK_FILE = "stock.json"
