@@ -2,186 +2,194 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import json, os
 
-TOKEN = os.getenv("TOKEN")
-OWNER_ID = 7153152247
+TOKEN = os.getenv("8656525286")
+OWNER_ID = 7153152247   # your telegram numeric ID
 
-# ---------------- STOCK ----------------
 STOCK_FILE = "stock.json"
+QUEUE_FILE = "queue.json"
+
+
+# ----------------- FILE SYSTEM -----------------
 
 def load_stock():
     if not os.path.exists(STOCK_FILE):
         return {}
-    return json.load(open(STOCK_FILE))
+    with open(STOCK_FILE, "r") as f:
+        return json.load(f)
 
 def save_stock(data):
-    json.dump(data, open(STOCK_FILE,"w"))
+    with open(STOCK_FILE, "w") as f:
+        json.dump(data, f)
+
+
+def load_queue():
+    if not os.path.exists(QUEUE_FILE):
+        return {}
+    with open(QUEUE_FILE, "r") as f:
+        return json.load(f)
+
+def save_queue(data):
+    with open(QUEUE_FILE, "w") as f:
+        json.dump(data, f)
+
 
 def is_owner(update):
     return update.effective_user.id == OWNER_ID
 
-# ADD ITEM
+
+# ----------------- START -----------------
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update): return
+    await update.message.reply_text(
+"""Workshop Inventory Bot Ready
+
+Commands:
+
+/add item qty
+/remove item qty
+/stock
+/order add name item
+/order done name item
+/pending"""
+    )
+
+
+# ----------------- ADD STOCK -----------------
+
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update): return
     if len(context.args) < 2:
-        await update.message.reply_text("Usage: /add item qty")
+        await update.message.reply_text("Usage: /add item quantity")
         return
-    item = context.args[0]
-    try:
-        qty = int(context.args[1])
-    except:
-        await update.message.reply_text("Quantity must be number")
-        return
+
+    item = context.args[0].lower()
+    qty = int(context.args[1])
 
     stock = load_stock()
-    stock[item] = stock.get(item,0)+qty
+    stock[item] = stock.get(item, 0) + qty
     save_stock(stock)
-    await update.message.reply_text(f"{item} added. Total: {stock[item]}")
 
-# REMOVE ITEM
+    # check pending orders
+    queue = load_queue()
+
+    if item in queue and len(queue[item]) > 0:
+        ready = min(qty, len(queue[item]))
+        customers = queue[item][:ready]
+
+        msg = f"{qty} {item} added.\n\nDeliver to:\n"
+        for c in customers:
+            msg += f"- {c}\n"
+
+        await update.message.reply_text(msg)
+    else:
+        await update.message.reply_text(f"{item} added. Total: {stock[item]}")
+
+
+# ----------------- REMOVE (SALE / SHIP) -----------------
+
 async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update): return
     if len(context.args) < 2:
-        await update.message.reply_text("Usage: /remove item qty")
+        await update.message.reply_text("Usage: /remove item quantity")
         return
 
-    item = context.args[0]
-    try:
-        qty = int(context.args[1])
-    except:
-        await update.message.reply_text("Quantity must be number")
-        return
+    item = context.args[0].lower()
+    qty = int(context.args[1])
 
     stock = load_stock()
-    stock[item] = max(0, stock.get(item,0)-qty)
+    stock[item] = stock.get(item, 0) - qty
     save_stock(stock)
 
     remaining = stock[item]
+
     msg = f"{item} left: {remaining}"
 
-    if remaining == 0:
-        msg += "\n⛔ OUT OF STOCK — deactivate Etsy listing!"
-    elif remaining == 1:
-        msg += "\n⚠ LOW STOCK WARNING (only 1 remaining)"
+    if remaining <= 0:
+        msg += "\n⚠ OUT OF STOCK — deactivate Etsy listing!"
 
     await update.message.reply_text(msg)
 
-# SHOW STOCK
+
+# ----------------- STOCK VIEW -----------------
+
 async def stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update): return
-    data = load_stock()
-    if not data:
+
+    stock = load_stock()
+    if not stock:
         await update.message.reply_text("Inventory empty")
         return
-    text="\n".join([f"{k}: {v}" for k,v in data.items()])
+
+    text = "CURRENT STOCK:\n"
+    for k, v in stock.items():
+        text += f"{k}: {v}\n"
+
     await update.message.reply_text(text)
 
-# ---------------- MATERIALS ----------------
-MAT_FILE="materials.json"
 
-def load_mat():
-    if not os.path.exists(MAT_FILE):
-        return {"steel":{}, "wood":{}, "leather":{}}
-    return json.load(open(MAT_FILE))
-
-def save_mat(data):
-    json.dump(data, open(MAT_FILE,"w"))
-
-async def steel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_owner(update): return
-    if len(context.args)<3: return
-    action,name,qty=context.args[0],context.args[1],int(context.args[2])
-    data=load_mat()
-    if action=="add":
-        data["steel"][name]=data["steel"].get(name,0)+qty
-    else:
-        data["steel"][name]=max(0,data["steel"].get(name,0)-qty)
-    save_mat(data)
-    await update.message.reply_text(f"Steel {name}: {data['steel'][name]}")
-
-async def wood(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_owner(update): return
-    if len(context.args)<3: return
-    action,name,qty=context.args[0],context.args[1],int(context.args[2])
-    data=load_mat()
-    if action=="add":
-        data["wood"][name]=data["wood"].get(name,0)+qty
-    else:
-        data["wood"][name]=max(0,data["wood"].get(name,0)-qty)
-    save_mat(data)
-    await update.message.reply_text(f"Wood {name}: {data['wood'][name]}")
-
-async def leather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_owner(update): return
-    if len(context.args)<3: return
-    action,name,qty=context.args[0],context.args[1],int(context.args[2])
-    data=load_mat()
-    if action=="add":
-        data["leather"][name]=data["leather"].get(name,0)+qty
-    else:
-        data["leather"][name]=max(0,data["leather"].get(name,0)-qty)
-    save_mat(data)
-    await update.message.reply_text(f"Leather {name}: {data['leather'][name]}")
-
-async def material(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_owner(update): return
-    data=load_mat()
-    text="STEEL:\n"
-    for k,v in data["steel"].items(): text+=f"{k}: {v}\n"
-    text+="\nWOOD:\n"
-    for k,v in data["wood"].items(): text+=f"{k}: {v}\n"
-    text+="\nLEATHER:\n"
-    for k,v in data["leather"].items(): text+=f"{k}: {v}\n"
-    await update.message.reply_text(text)
-
-# ---------------- ORDERS ----------------
-ORDER_FILE="orders.json"
-
-def load_orders():
-    if not os.path.exists(ORDER_FILE): return {}
-    return json.load(open(ORDER_FILE))
-
-def save_orders(data):
-    json.dump(data, open(ORDER_FILE,"w"))
+# ----------------- ORDER QUEUE -----------------
 
 async def order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update): return
-    if len(context.args)<2: return
-    action,name=context.args[0],context.args[1]
-    data=load_orders()
+    if len(context.args) < 3:
+        await update.message.reply_text("Usage: /order add/done name item")
+        return
 
-    if action=="add":
-        if len(context.args)<3: return
-        item=context.args[2]
-        data[name]=item
-        save_orders(data)
-        await update.message.reply_text(f"Order added: {name} -> {item}")
-    elif action=="done":
-        if name in data:
-            del data[name]
-            save_orders(data)
-            await update.message.reply_text(f"Order completed: {name}")
+    action = context.args[0]
+    name = context.args[1]
+    item = context.args[2].lower()
 
-async def orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    queue = load_queue()
+
+    if item not in queue:
+        queue[item] = []
+
+    if action == "add":
+        queue[item].append(name)
+        save_queue(queue)
+        await update.message.reply_text(f"Order saved: {name} → {item}")
+
+    elif action == "done":
+        if name in queue[item]:
+            queue[item].remove(name)
+            save_queue(queue)
+            await update.message.reply_text(f"Completed: {name}")
+        else:
+            await update.message.reply_text("Order not found")
+
+
+# ----------------- PENDING LIST -----------------
+
+async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update): return
-    data=load_orders()
-    if not data:
+
+    queue = load_queue()
+    if not queue:
         await update.message.reply_text("No pending orders")
         return
-    text="PENDING ORDERS:\n"
-    for k,v in data.items(): text+=f"{k} -> {v}\n"
+
+    text = "PENDING ORDERS:\n"
+
+    for item, customers in queue.items():
+        if customers:
+            text += f"\n{item}:\n"
+            for i, c in enumerate(customers, 1):
+                text += f"{i}) {c}\n"
+
     await update.message.reply_text(text)
 
-# ---------------- START ----------------
-app=ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("add",add))
-app.add_handler(CommandHandler("remove",remove))
-app.add_handler(CommandHandler("stock",stock))
-app.add_handler(CommandHandler("steel",steel))
-app.add_handler(CommandHandler("wood",wood))
-app.add_handler(CommandHandler("leather",leather))
-app.add_handler(CommandHandler("material",material))
-app.add_handler(CommandHandler("order",order))
-app.add_handler(CommandHandler("orders",orders))
+# ----------------- MAIN -----------------
 
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("add", add))
+app.add_handler(CommandHandler("remove", remove))
+app.add_handler(CommandHandler("stock", stock))
+app.add_handler(CommandHandler("order", order))
+app.add_handler(CommandHandler("pending", pending))
+
+print("BOT RUNNING...")
 app.run_polling()
